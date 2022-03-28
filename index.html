@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📖 VR Books</title>
+
+    <script src="https://aframe.io/releases/1.3.0/aframe.js"></script>
+    <script src="./js/index.js"></script>
+</head>
+
+<body>
+    <a-scene id="root" background="color: #edd1b0" init>
+        <a-assets>
+            <a-asset-item id="room1" src="./assets/zen_island/scene.gltf"></a-asset-item>
+            <a-asset-item id="room2" src="./assets/baking__shading_test/scene.gltf"></a-asset-item>
+        </a-assets>
+
+        <a-entity id="rig">
+            <a-entity look-controls wasd-controls camera position="0 0 0"></a-entity>
+            <a-entity cursor="rayOrigin:mouse;"></a-entity>
+            <a-entity id="leftHand" laser-controls="hand: left"
+                raycaster="showLine: true; lineColor: red; objects: [data-raycastable];" thumbstick-logging></a-entity>
+            <a-entity id="rightHand" laser-controls="hand: right"
+                raycaster="showLine: true; lineColor: red; objects: [data-raycastable];" thumbstick-logging></a-entity>
+        </a-entity>
+
+        <a-entity id="indexPage">
+            <a-entity id="body" position="0 0 -3.5"></a-entity>
+        </a-entity>
+
+        <a-entity id="bookPage" visible="false" position="0 0 0">
+            <!-- <a-entity id="room" position="0 -0.45346 -1.06693" gltf-model="#room2"></a-entity> -->
+
+            <a-box id="exit" scale=".1 .1 .1" color="red" position="1.3 2 -1.5" data-raycastable></a-box>
+            <a-entity id="page" text="color: #ffffff" position="-.3 2 -1.5"></a-entity>
+            <a-entity id="book" position="0 0 -1" scale="1 1 0"
+                text="baseline: center; align: center; lineHeight: 60; side: double; wrapCount: 60; color: #ffffff;">
+            </a-entity>
+    </a-scene>
+</body>
+
+</html>
