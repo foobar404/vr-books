@@ -7,7 +7,6 @@ const bookTopics = [
     "Short Stories",
     "Banned Books From Anne Haight's List",
     "Science Fiction",
-    "England Fiction",
     "Children's Literature",
     "Movie Books",
     "Psychological Fiction",
@@ -62,8 +61,6 @@ function loadPage() {
     let end = start + wordsPerPage;
     let pageText = bookText.split(" ").slice(start, end).join(" ").replace(/[^\x00-\x7F]/g, "");
 
-    pageText = pageText.split("").map(v => (v == " ") ? v : "f").join("")
-
     window.page.setAttribute("text", {
         value: `Page ${currentPage} of ${totalPages}`
     });
@@ -84,9 +81,21 @@ AFRAME.registerComponent('init', {
             z: -1
         };
 
+        html("a-entity", "#body", {
+            text: {
+                value: "Loading, please wait",
+                color: "#000"
+            },
+            scale: "5 5 5",
+            position: "1 1 -.2",
+            id: "loading"
+        })
+
         bookTopics.map(async topic => {
             let req = await fetch(`${bookMetaUrl}/books?topic=${topic}`);
             let json = await req.json();
+
+            if (window.loading) window.loading.remove();
 
             html("a-entity", "#body", {
                 text: `value: ${topic}; color: #000;`,
@@ -222,6 +231,7 @@ AFRAME.registerComponent('click-event', {
             let { type, value } = JSON.parse(this.el.dataset.raycastable);
 
             if (type == "link") {
+                mixpanel.track('Book', { url: value });
                 showBook(value);
             }
         })
