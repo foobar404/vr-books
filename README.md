@@ -2,7 +2,7 @@
 
 <p>
   A large catalog of free books, in a VR environment. Supports Oculus Quest / Meta Quest 2.
-  <a href="https://foobar404.dev/vr-books/" target="_blank">Website</a>
+  <a href="https://foobar404.dev/vr-books/">Website</a>
 </p> 
 
 
