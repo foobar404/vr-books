@@ -1,3 +1,6 @@
+<!-- <script src="https://unpkg.com/aframe-super-keyboard@1.0.0/dist/aframe-super-keyboard.min.js"></script> -->
+<!-- <a-entity id="keyboard" super-keyboard="hand: #rightHand; imagePath: ./assets; visible: false;" position="0 0 -1" rotation="-30 0 0"></a-entity> -->
+
 <!DOCTYPE html>
 <html lang="en">
 
@@ -7,55 +10,51 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>📖 VR Books</title>
 
-    <script type="text/javascript">
-        (function(f,b){if(!b.__SV){var e,g,i,h;window.mixpanel=b;b._i=[];b.init=function(e,f,c){function g(a,d){var b=d.split(".");2==b.length&&(a=a[b[0]],d=b[1]);a[d]=function(){a.push([d].concat(Array.prototype.slice.call(arguments,0)))}}var a=b;"undefined"!==typeof c?a=b[c]=[]:c="mixpanel";a.people=a.people||[];a.toString=function(a){var d="mixpanel";"mixpanel"!==c&&(d+="."+c);a||(d+=" (stub)");return d};a.people.toString=function(){return a.toString(1)+".people (stub)"};i="disable time_event track track_pageview track_links track_forms track_with_groups add_group set_group remove_group register register_once alias unregister identify name_tag set_config reset opt_in_tracking opt_out_tracking has_opted_in_tracking has_opted_out_tracking clear_opt_in_out_tracking start_batch_senders people.set people.set_once people.unset people.increment people.append people.union people.track_charge people.clear_charges people.delete_user people.remove".split(" ");
-        for(h=0;h<i.length;h++)g(a,i[h]);var j="set set_once union unset remove delete".split(" ");a.get_group=function(){function b(c){d[c]=function(){call2_args=arguments;call2=[c].concat(Array.prototype.slice.call(call2_args,0));a.push([e,call2])}}for(var d={},e=["get_group"].concat(Array.prototype.slice.call(arguments,0)),c=0;c<j.length;c++)b(j[c]);return d};b._i.push([e,f,c])};b.__SV=1.2;e=f.createElement("script");e.type="text/javascript";e.async=!0;e.src="undefined"!==typeof MIXPANEL_CUSTOM_LIB_URL?
-        MIXPANEL_CUSTOM_LIB_URL:"file:"===f.location.protocol&&"//cdn.mxpnl.com/libs/mixpanel-2-latest.min.js".match(/^\/\//)?"https://cdn.mxpnl.com/libs/mixpanel-2-latest.min.js":"//cdn.mxpnl.com/libs/mixpanel-2-latest.min.js";g=f.getElementsByTagName("script")[0];g.parentNode.insertBefore(e,g)}})(document,window.mixpanel||[]);
-        
-        mixpanel.init('a2618e3c009d5a089295c334a9ec54ef'); 
-        mixpanel.track('New User');
-    </script>
     <script src="https://aframe.io/releases/1.3.0/aframe.js"></script>
-    <!-- <script src="https://unpkg.com/aframe-super-keyboard@1.0.0/dist/aframe-super-keyboard.min.js"></script> -->
-    <script src="./js/index.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/donmccurdy/aframe-extras@v6.1.1/dist/aframe-extras.misc.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/n5ro/aframe-physics-system@v4.0.1/dist/aframe-physics-system.min.js"></script>
+    <script src="https://unpkg.com/super-hands@^3.0.3/dist/super-hands.min.js"></script>
+    <script src="https://unpkg.com/aframe-log-component/dist/aframe-log-component.min.js"></script>
+    <script src="https://unpkg.com/aframe-environment-component@1.3.1/dist/aframe-environment-component.min.js"></script>
+
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <script type="text/javascript" src="./js/libs/mixpanel.js"></script>
+
+    <script src="./js/00-globals.js"></script>
+    <script src="./js/01-multi-material.js"></script>
+    <script src="./js/02-a-book.js"></script>
+    <script src="./js/03-bookshelf.js"></script>
+    <script src="./js/04-environment-controls.js"></script>
 </head>
 
 <body>
-    <a-scene id="root" background="color: #edd1b0" init>
-        <!-- <a-assets>
-            <a-asset-item id="room1" src="./assets/zen_island/scene.gltf"></a-asset-item>
-            <a-asset-item id="room2" src="./assets/baking__shading_test/scene.gltf"></a-asset-item>
-        </a-assets> -->
+    <a-scene id="root">
+        <a-assets>
+            <img id="bookPages" src="./assets/images/bookPages.jpg">
+            <img id="bookPages2" src="./assets/images/bookPages2.jpg">
+            <img id="bookBack" src="./assets/images/bookBack.png">
+            <img id="bookCover" src="./assets/images/bookCover.jpg">
+        </a-assets>
 
-        <a-entity id="rig">
-            <a-entity look-controls wasd-controls camera position="0 0 0"></a-entity>
-            <a-entity cursor="rayOrigin:mouse;"></a-entity>
-            <a-entity id="leftHand" laser-controls="hand: left"
-                raycaster="showLine: true; lineColor: red; objects: [data-raycastable];" thumbstick-logging></a-entity>
-            <a-entity id="rightHand" laser-controls="hand: right"
-                raycaster="showLine: true; lineColor: red; objects: [data-raycastable];" thumbstick-logging></a-entity>
+        <!-- <a-entity log geometry="primitive: plane" material="color: #111" text="color: lightgreen" position="0 0 -1">
+        </a-entity> -->
+
+        <a-entity light="type: ambient; color: #fff; intensity: 0.4;"></a-entity>
+        <a-entity id="env" environment="preset:forest; dressingAmount: 60" position="0 -2 0"></a-entity>
+
+        <a-entity id="rig" look-controls wasd-controls position="0 0 0">
+            <a-entity id="camera" camera></a-entity>
+            <a-entity cursor raycaster="far: 1000; interval: 250; objects: [clickable]"></a-entity>
+            <a-entity id="leftHand" hand-controls="hand: left" laser-controls="hand: left" super-hands
+                raycaster="showLine: true; lineColor: red; objects: [clickable];" sphere-collider="objects: [clickable]"
+                environment-controls></a-entity>
+            <a-entity id="rightHand" hand-controls="hand: right" laser-controls="hand: right" super-hands
+                raycaster="showLine: true; lineColor: red; objects: [clickable];" sphere-collider="objects: [clickable]"
+                environment-controls></a-entity>
         </a-entity>
 
-        <a-entity id="indexPage">
-            <a-entity id="body" position="0 0 -3.5"></a-entity>
-
-            <!-- <a-entity id="keyboard" super-keyboard="hand: #rightHand; imagePath: ./assets; visible: false;" position="0 0 -1" rotation="-30 0 0"></a-entity> -->
-        </a-entity>
-
-        <a-entity id="bookPage" visible="false" position="-.25 0 0">
-            <!-- <a-entity id="room" position="0 -0.45346 -1.06693" gltf-model="#room2"></a-entity> -->
-
-            <a-box id="exit" scale=".1 .1 .1" color="red" position="1.3 2 -1.5" data-raycastable></a-box>
-            <a-entity id="page" text="color: #000" position="-.3 2 -1.5"></a-entity>
-            <a-entity id="book" position=".2 2 -1.5" scale="1 1 1"
-                text="baseline: top; align: center; lineHeight: 60; side: double; wrapCount: 60; color: #000;">
-            </a-entity>
-        </a-entity>
+        <a-entity id="bookshelf" bookshelf></a-entity>
     </a-scene>
 </body>
 
 </html>
-
-<!-- https://archive.org/advancedsearch.php?q=subject:palm+pilot+software&output=json -->
-<!-- https://archive.org/metadata/grace_of_osmonde_1209_librivox/ -->
-<!-- https://archive.org/download/grace_of_osmonde_1209_librivox/HisGraceOfOsmonde21-32_librivox.m4b -->
