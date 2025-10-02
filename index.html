@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>XR Book Reader</title>
+
+    <!-- A-Frame -->
+    <script src="https://aframe.io/releases/1.7.0/aframe.min.js"></script>
+    
+    <!-- A-Frame Environment Component -->
+    <script src="https://cdn.jsdelivr.net/gh/supermedium/aframe-environment-component@master/dist/aframe-environment-component.min.js"></script>
+    
+    <!-- Super Hands for VR Grabbing -->
+    <script src="https://cdn.jsdelivr.net/gh/wmurphyrd/aframe-super-hands-component@master/dist/super-hands.min.js"></script>
+    
+    <!-- JSZip for EPUB parsing -->
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+    
+    <!-- Components -->
+    <script src="./components/book-display.js"></script>
+    <script src="./components/book-controls.js"></script>
+    <script src="./components/environment-controls.js"></script>
+    <script src="./components/book-library.js"></script>
+    <script src="./components/table-of-contents.js"></script>
+    <script src="./components/mouse-raycast.js"></script>
+    <script src="./components/cursor-feedback.js"></script>
+    <script src="./components/notification-system.js"></script>
+    <script src="./components/vr-book.js"></script>
+    <script src="./components/vr-controller-input.js"></script>
+    <script src="./components/virtual-bookshelf.js"></script>
+    <script src="./components/bookmark-system.js" type="module"></script>
+    
+    <!-- Main app -->
+    <script src="./index.js" type="module"></script>
+</head>
+<body>
+    <a-scene environment-controls lighting-controls>
+        <!-- Camera -->
+        <a-entity id="camera-rig" position="0 1.6 0">
+            <a-camera id="camera" 
+                look-controls 
+                wasd-controls="acceleration: 20"
+                mouse-raycast="objects: .grabbable, .bookshelf-book, .interactive-book; showLine: false"
+                cursor-feedback>
+            </a-camera>
+            
+            <!-- Left Hand Controller -->
+            <a-entity 
+                id="left-hand" 
+                oculus-touch-controls="hand: left; model: true"
+                laser-controls="hand: left; color: #ff0066; defaultModel: false"
+                raycaster="objects: .grabbable, .bookshelf-book, .interactive-book; far: 10; interval: 100"
+                vr-controller-input="hand: left"
+                super-hands="
+                    colliderEvent: raycaster-intersection; 
+                    colliderEventProperty: els; 
+                    colliderEndEvent: raycaster-intersection-cleared; 
+                    colliderEndEventProperty: clearedEls;
+                    dragDropStartButtons: gripdown, trackpaddown, triggerdown;
+                    dragDropEndButtons: gripup, trackpadup, triggerup">
+            </a-entity>
+            
+            <!-- Right Hand Controller -->
+            <a-entity 
+                id="right-hand" 
+                oculus-touch-controls="hand: right; model: true"
+                laser-controls="hand: right; color: #0066ff; defaultModel: false"
+                raycaster="objects: .grabbable, .bookshelf-book, .interactive-book; far: 10; interval: 100"
+                vr-controller-input="hand: right"
+                super-hands="
+                    colliderEvent: raycaster-intersection; 
+                    colliderEventProperty: els; 
+                    colliderEndEvent: raycaster-intersection-cleared; 
+                    colliderEndEventProperty: clearedEls;
+                    dragDropStartButtons: gripdown, trackpaddown, triggerdown;
+                    dragDropEndButtons: gripup, trackpadup, triggerup">
+            </a-entity>
+
+            <!-- Virtual Bookshelf (child of camera rig) -->
+            <a-entity 
+                id="bookshelf" 
+                position="0 1.7 -0.5" 
+                virtual-bookshelf>
+            </a-entity>
+        </a-entity>
+
+        <!-- Lights -->
+        <a-light id="ambient-light" type="ambient" intensity="0.5"></a-light>
+        <a-light id="directional-light" type="directional" position="2 4 2" intensity="0.8"></a-light>
+
+        <!-- Environment (will be set by environment-controls) -->
+        <a-sky id="sky" color="#87CEEB" visible="false"></a-sky>
+
+        <!-- Book Display -->
+        <a-entity 
+            id="book" 
+            position="0 1.6 -2" 
+            rotation="0 0 0"
+            class="grabbable"
+            grabbable
+            stretchable
+            draggable
+            vr-book=""
+            book-display 
+            book-controls 
+            page-controls
+            bookmark-system
+            visible="false">
+        </a-entity>
+
+        <!-- Table of Contents -->
+        <a-entity 
+            id="table-of-contents" 
+            position="-1.8 1.6 -2" 
+            table-of-contents
+            class="interactive-book"
+            visible="true">
+        </a-entity>
+
+        <!-- Book Library UI -->
+        <a-entity 
+            id="library" 
+            position="-1.5 1.6 -2" 
+            book-library>
+        </a-entity>
+
+        <!-- Notification System -->
+        <a-entity 
+            id="notifications" 
+            position="0 2.5 -2" 
+            notification-system>
+        </a-entity>
+    </a-scene>
+</body>
+</html>
