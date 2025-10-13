@@ -4,129 +4,137 @@ AFRAME.registerComponent("vr-book", {
   bookThickness: 0.02,
   currentPage: 0,
   epub: null,
-  rendition: null,
   bookText: '',
   chapters: [],
   wordsPerPage: 200,
   schema: {
     bookPath: { type: 'string', default: '' },
+    // Optional asset id to load from <a-assets>. If present, it takes precedence over bookPath
+    assetId: { type: 'string', default: '' }
   },
   init: function () {
     this.bookContainer = document.createElement('a-entity');
-    this.bookContainer.setAttribute('class', 'grabbable');
-    
-    // Add grabbable attribute for simple-grab component
+    this.bookContainer.classList.add('grabbable');
     this.bookContainer.setAttribute('grabbable', '');
-    
-    // Add geometry for raycaster detection
     this.bookContainer.setAttribute('geometry', `primitive: box; width: ${this.bookWidth}; height: ${this.bookHeight}; depth: ${this.bookThickness}`);
-    this.bookContainer.setAttribute('material', 'color: red; opacity: 0; transparent: true'); // Invisible collision box
-    
-    // Track grab state for floating animation
+    this.bookContainer.setAttribute('material', 'color: red; opacity: 0; transparent: true');
     this.isGrabbed = false;
-    
     this.el.appendChild(this.bookContainer);
 
-    this.createBook();
+  // Hover state handlers
+  this.isHovered = false;
+  this._onRayIntersect = this._onRayIntersect.bind(this);
+  this._onRayIntersectCleared = this._onRayIntersectCleared.bind(this);
+  // Axis (joystick) handling for page turning
+  this._onAxisMove = this._onAxisMove.bind(this);
+  this._lastAxisSign = 0;
+  this._lastFlipTime = 0;
+
     this.setupEvents();
+
+    // Prepare storage key for persistence
+    this.storageKey = null;
+    if (this.data.assetId) this.storageKey = `vr-book:${this.data.assetId}`;
+    else if (this.data.bookPath) this.storageKey = `vr-book:${this.data.bookPath}`;
+
+    // Load saved page if available
+    if (this.storageKey) {
+      try {
+        const saved = localStorage.getItem(this.storageKey);
+        if (saved != null) {
+          const n = parseInt(saved, 10);
+          if (!Number.isNaN(n) && n >= 0) this.currentPage = n;
+        }
+      } catch (e) {
+        // ignore localStorage errors
+      }
+    }
+
+    this.createBook();
     this.loadEpub();
+
+    // Save on page unload
+    this._onBeforeUnload = () => this.savePage();
+    window.addEventListener('beforeunload', this._onBeforeUnload);
   },
 
-  loadEpub: function () {
-    if (!this.data.bookPath) return;
+  loadEpub: async function () {
+    // Resolve book source: assetId in <a-assets> takes precedence
+    let src = '';
+    if (this.data.assetId) {
+      const assetEl = document.getElementById(this.data.assetId);
+      if (assetEl) src = assetEl.getAttribute('src') || '';
+    }
+    if (!src) src = this.data.bookPath || '';
+    if (!src) return;
 
-    this.epub = ePub(this.data.bookPath);
-    this.epub.ready.then(() => {
-      
-      // Get book metadata
-      this.epub.loaded.metadata.then((metadata) => {
+    try {
+      this.epub = ePub(src);
+      await this.epub.ready;
+
+      // metadata
+      try {
+        const metadata = await this.epub.loaded.metadata;
         this.title = metadata.title || 'Unknown Title';
         this.author = metadata.creator || 'Unknown Author';
-      });
+      } catch (e) {
+        this.title = this.title || 'Unknown Title';
+        this.author = this.author || 'Unknown Author';
+      }
 
-      // Get cover image
-      this.epub.loaded.cover.then((cover) => {
+      // cover
+      try {
+        const cover = await this.epub.loaded.cover;
         if (cover) {
-          this.epub.archive.createUrl(cover, { base64: false }).then((url) => {
-            this.coverImageUrl = url;
-            this.updateCoverImage();
-          });
+          const url = await this.epub.archive.createUrl(cover, { base64: false });
+          this.coverImageUrl = url;
         }
-      }).catch(() => {
-        console.log('No cover image found');
-      });
+      } catch (e) {
+        // no cover
+      }
 
-      // Get all book content for proper pagination
-      const loadPromises = this.epub.spine.spineItems.map((item, index) => {
-        return this.epub.load(item.href).then((doc) => {
-          // Try multiple methods to extract text content
+      // load spine content
+      const items = this.epub.spine.spineItems || [];
+      const chapters = await Promise.all(items.map(async (item, i) => {
+        try {
+          const doc = await this.epub.load(item.href);
+          // extract text
           let text = '';
-          if (doc.textContent) {
-            text = doc.textContent;
-          } else if (doc.innerText) {
-            text = doc.innerText;
-          } else if (doc.body && doc.body.textContent) {
-            text = doc.body.textContent;
-          } else {
-            // Fallback: get text from all text nodes
-            const walker = document.createTreeWalker(
-              doc.body || doc,
-              NodeFilter.SHOW_TEXT,
-              null,
-              false
-            );
-            let node;
-            const textParts = [];
-            while (node = walker.nextNode()) {
-              if (node.textContent.trim()) {
-                textParts.push(node.textContent.trim());
-              }
-            }
-            text = textParts.join(' ');
-          }
+          if (doc.body) text = (doc.body.textContent || '').trim();
+          if (!text) text = (doc.textContent || doc.innerText || '').trim();
+          text = text.replace(/\s+/g, ' ');
 
-          // Clean up the text
-          text = text.replace(/\s+/g, ' ').trim();
+          // chapter title
+          let chapterTitle = item.label || `Chapter ${i + 1}`;
+          const tEl = doc.querySelector && doc.querySelector('h1,h2,h3,title');
+          if (tEl && tEl.textContent) chapterTitle = tEl.textContent.trim();
 
-          // Try to extract chapter title
-          let chapterTitle = item.label || `Chapter ${index + 1}`;
-
-          // Look for title in the document
-          const titleElements = doc.querySelectorAll('h1, h2, h3, title');
-          if (titleElements.length > 0) {
-            const titleText = titleElements[0].textContent.trim();
-            if (titleText && titleText.length < 100) {
-              chapterTitle = titleText;
-            }
-          }
-
-          return { title: chapterTitle, text: text };
-        }).catch(() => {
-          console.warn('Failed to load chapter:', item.href);
-          return { title: `Chapter ${index + 1}`, text: '' };
-        });
-      });
-
-      Promise.all(loadPromises).then((chapters) => {
-        this.chapters = chapters;
-        this.bookText = chapters.map(ch => ch.text).join(' ');
-        this.calculateTotalPages();
-        this.createBook(); // Recreate with proper content
-        // Reapply cover image after recreation
-        if (this.coverImageUrl) {
-          this.updateCoverImage();
+          return { title: chapterTitle, text };
+        } catch (err) {
+          return { title: `Chapter ${i + 1}`, text: '' };
         }
-      }).catch((error) => {
-        console.error('Error loading book content:', error);
-        this.bookText = 'Failed to load book content.';
-        this.createBook();
-      });
-    }).catch((error) => {
-      console.warn('Failed to load EPUB:', error);
-      this.title = 'Unknown Title';
-      this.author = 'Unknown Author';
+      }));
+
+      this.chapters = chapters;
+      this.bookText = chapters.map(c => c.text).join(' ');
+      this.calculateTotalPages();
       this.createBook();
-    });
+      // Clamp restored page
+      if (this.currentPage >= this.totalPages) this.currentPage = Math.max(0, this.totalPages - 1);
+      this.createPages();
+      this.savePage();
+      if (this.coverImageUrl) this.updateCoverImage();
+    } catch (err) {
+      console.warn('Failed to load EPUB', err);
+      this.title = this.title || 'Unknown Title';
+      this.author = this.author || 'Unknown Author';
+      this.bookText = this.bookText || '';
+      this.createBook();
+      // ensure saved page does not exceed total when load fails
+      if (this.currentPage >= (this.totalPages || 1)) this.currentPage = Math.max(0, (this.totalPages || 1) - 1);
+      this.createPages();
+      this.savePage();
+    }
   },
 
   createBook: function () {
@@ -153,21 +161,8 @@ AFRAME.registerComponent("vr-book", {
     const canvas = document.createElement('canvas');
     canvas.width = canvas.height = 512;
     const ctx = canvas.getContext('2d');
-
-    // Get content and handle async loading
     const content = this.getPageContent();
-
-    if (content && content.then) {
-      // Handle async EPUB content
-      content.then((resolvedContent) => {
-        this.renderPageContent(ctx, resolvedContent);
-      }).catch(() => {
-        this.renderPageContent(ctx, { title: this.title || 'Error', text: 'Failed to load content' });
-      });
-    } else {
-      // Handle synchronous content
-      this.renderPageContent(ctx, content);
-    }
+    this.renderPageContent(ctx, content);
   },
 
   renderPageContent: function (ctx, content) {
@@ -209,10 +204,9 @@ AFRAME.registerComponent("vr-book", {
     geometry.translate(this.bookWidth / 2, 0, 0);
 
     this.coverMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
-
     this.coverMesh = new THREE.Mesh(geometry, this.coverMaterial);
     this.coverMesh.position.set(-this.bookWidth / 2, 0, this.bookThickness / 2);
-    this.coverMesh.rotation.y = -Math.PI / 2;
+    this._hoverEnabled = false;
     this.bookContainer.setObject3D('cover', this.coverMesh);
 
     // Apply cover image if already loaded
@@ -341,17 +335,78 @@ AFRAME.registerComponent("vr-book", {
       if (e.key === 'b') this.nextPage();
       if (e.key === 'v') this.prevPage();
     });
-    document.addEventListener('abuttondown', () => this.prevPage());
-    document.addEventListener('bbuttondown', () => this.nextPage());
-    
+    // Use joystick left/right while a controller ray is intersecting this book
+    document.addEventListener('axismove', this._onAxisMove);
+    document.addEventListener('thumbstickmoved', this._onAxisMove);
+
     // Listen for grab events to update floating animation state
     this.bookContainer.addEventListener('grab-start', (evt) => {
       this.isGrabbed = true;
     });
-    
+
     this.bookContainer.addEventListener('grab-end', (evt) => {
       this.isGrabbed = false;
     });
+
+    // Raycaster hover events (controllers will emit these when intersecting)
+    // Use bookContainer because raycasters intersect the visible entity
+    this.bookContainer.addEventListener('raycaster-intersected', this._onRayIntersect);
+    this.bookContainer.addEventListener('raycaster-intersected-cleared', this._onRayIntersectCleared);
+    // Also support cursor mouseenter/mouseleave for desktop testing
+    this.bookContainer.addEventListener('mouseenter', this._onRayIntersect);
+    this.bookContainer.addEventListener('mouseleave', this._onRayIntersectCleared);
+  },
+
+  // Axis handler: only flip pages when the controller that emitted the axis
+  // event is currently intersecting this bookContainer
+  _onAxisMove: function (evt) {
+    try {
+      const detail = evt && evt.detail;
+      const axes = detail && (detail.axis || detail.axes) || [];
+      const x = Array.isArray(axes) ? axes[0] : (axes && axes.x) || 0;
+      const controller = evt && evt.target;
+      if (!controller) return;
+
+      // Ensure this controller's raycaster currently intersects this bookContainer
+      const rc = controller.components && controller.components.raycaster;
+      if (!rc) return;
+      const intersected = rc.intersectedEls || rc.intersected || [];
+      // intersectedEls may contain either the bookContainer or the parent element; check both
+      const hit = intersected.indexOf(this.bookContainer) !== -1 || intersected.indexOf(this.el) !== -1;
+      if (!hit) return;
+
+      const now = Date.now();
+      const threshold = 0.5; // require a firm left/right push
+      const sign = x > threshold ? 1 : (x < -threshold ? -1 : 0);
+      // Only act on a sign change (push then release then push) or after cooldown
+      if (sign === 0) {
+        // reset lastAxisSign when joystick returns to center
+        this._lastAxisSign = 0;
+        return;
+      }
+
+      if (sign !== this._lastAxisSign && (now - this._lastFlipTime) > 300) {
+        if (sign > 0) {
+          this.nextPage();
+        } else if (sign < 0) {
+          this.prevPage();
+        }
+        this._lastFlipTime = now;
+        this._lastAxisSign = sign;
+      }
+    } catch (e) {
+      // ignore parsing errors
+    }
+  },
+
+  // Ray hover handlers
+  _onRayIntersect: function (evt) {
+    this.isHovered = true
+  },
+
+  _onRayIntersectCleared: function (evt) {
+    // Clear hover state when ray leaves
+    this.isHovered = false;
   },
 
   nextPage: function () {
@@ -359,6 +414,7 @@ AFRAME.registerComponent("vr-book", {
     if (this.currentPage < maxPages - 1) {
       this.currentPage++;
       this.createPages();
+      this.savePage();
     }
   },
 
@@ -366,13 +422,49 @@ AFRAME.registerComponent("vr-book", {
     if (this.currentPage > 0) {
       this.currentPage--;
       this.createPages();
+      this.savePage();
+    }
+  },
+
+  savePage: function () {
+    if (!this.storageKey) return;
+    try {
+      localStorage.setItem(this.storageKey, String(this.currentPage));
+    } catch (e) {
+      // ignore storage errors
     }
   },
 
   tick: function (time) {
-    if (this.coverMesh) {
-      // this.coverMesh.rotation.y = -Math.PI / 2 + Math.sin(time * 0.001) * Math.PI / 6;
+    if (!this.coverMesh) return;
+
+    const closedAngle = 0;
+    const openAngle = -(Math.PI / 2); // 90 degrees
+
+    if (this.isHovered) {
+      // Smoothly animate to open position over 0.5s, then add gentle oscillation
+      const oscillation = Math.sin(time * 0.001) * 0.2; // Small oscillation around open position
+      const target = openAngle + oscillation;
+      const cur = this.coverMesh.rotation.y;
+      this.coverMesh.rotation.y = THREE.MathUtils.lerp(cur, target, 0.08); // Slower lerp for 0.5s animation
+    } else {
+      // Smoothly close the cover back to the closedAngle
+      const cur = this.coverMesh.rotation.y;
+      this.coverMesh.rotation.y = THREE.MathUtils.lerp(cur, closedAngle, 0.12);
     }
-    // Note: Super-hands handles the movement automatically, no manual position updates needed
+  },
+  remove: function () {
+    try {
+      window.removeEventListener('beforeunload', this._onBeforeUnload);
+    } catch (e) { }
+    // Clean up hover listeners
+    try {
+      if (this.bookContainer) {
+        this.bookContainer.removeEventListener('raycaster-intersected', this._onRayIntersect);
+        this.bookContainer.removeEventListener('raycaster-intersected-cleared', this._onRayIntersectCleared);
+        this.bookContainer.removeEventListener('mouseenter', this._onRayIntersect);
+        this.bookContainer.removeEventListener('mouseleave', this._onRayIntersectCleared);
+      }
+    } catch (e) { }
   }
 });

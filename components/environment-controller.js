@@ -1,15 +1,15 @@
 AFRAME.registerComponent("environment-controller", {
     environmentElm: null,
+    currentIndex: 15,
     presets: ["default", "contact", "egypt", "checkerboard", "forest", "goaland",
         "yavapai", "goldmine", "threetowers", "poison", "arches", "tron", "japan",
         "dream", "volcano", "starry", "osiris", "moon"],
     init: function () {
-        this.currentIndex = 0;
         this.environmentElm = document.createElement("a-entity");
         this.el.appendChild(this.environmentElm);
 
         this.environmentElm.setAttribute("environment", {
-            preset: this.presets[0]
+            preset: this.presets[this.currentIndex]
         });
 
         document.addEventListener('keydown', this.onKeyDown.bind(this));

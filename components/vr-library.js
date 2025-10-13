@@ -24,20 +24,31 @@ AFRAME.registerComponent("vr-library", {
         // Listen for VR controller events
         document.addEventListener('xbuttondown', this.toggleVisibility);
 
-        fetch(this.data.booksPath)
-            .then(response => response.json())
-            .then(({ books }) => {
-                let pathRoot = this.data.booksPath.substring(0, this.data.booksPath.lastIndexOf("/"));
+        const scene = this.el.sceneEl
+        const assetItems = scene.querySelectorAll('a-asset-item');
+        const epubItems = Array.from(assetItems).filter(a => {
+            const src = a.getAttribute('src') || a.src || '';
+            return typeof src === 'string' && src.toLowerCase().endsWith('.epub');
+        });
 
-                books.forEach((book) => {
-                    this.addBook(`${pathRoot}/${book.filename}`);
-                });
-            })
-            .catch(error => console.error('Error loading books:', error));
+        if (epubItems.length > 0) {
+            epubItems.forEach(a => {
+                const id = a.getAttribute('id');
+                const src = a.getAttribute('src') || a.src;
+                if (id) {
+                    // Use asset id when available so vr-book can load from a-assets
+                    this.addBook({ assetId: id, src });
+                } else if (src) {
+                    this.addBook(src);
+                }
+            });
+            return;
+        }
     },
-    addBook: function (bookPath) {
-        this.books.push(bookPath);
-        
+    addBook: function (book) {
+        // book can be a string (src) or an object { assetId, src }
+        this.books.push(book);
+
         const bookIndex = this.books.length - 1;
 
         // Calculate grid position
@@ -50,9 +61,14 @@ AFRAME.registerComponent("vr-library", {
 
         let bookElm = document.createElement("a-entity");
         bookElm.setAttribute("position", `${x} ${y} 0`);
-        bookElm.setAttribute("vr-book", {
-            bookPath
-        });
+        // If caller provided an assetId, prefer that so vr-book loads from <a-assets>
+        if (typeof book === 'object' && book.assetId) {
+            bookElm.setAttribute('vr-book', { assetId: book.assetId });
+        } else if (typeof book === 'object' && book.src) {
+            bookElm.setAttribute('vr-book', { bookPath: book.src });
+        } else {
+            bookElm.setAttribute('vr-book', { bookPath: book });
+        }
 
         // Store book element and original position for animation
         this.bookElements.push({
@@ -64,36 +80,35 @@ AFRAME.registerComponent("vr-library", {
         this.libraryElm.appendChild(bookElm);
     },
 
-    tick: function(time, timeDelta) {
+    tick: function (time, timeDelta) {
         // Floating animation temporarily disabled to fix dragging issues
         // TODO: Re-enable with proper grab state detection
-        return;
-        
+
         // Update animation time
         this.time += timeDelta * 0.001; // Convert to seconds
-        
+
         // Animate each book with floating motion
         this.bookElements.forEach((bookData) => {
             const { element, originalPos, animationOffset } = bookData;
-            
+
             // Check if this book is currently grabbed - if so, skip floating animation
             const bookComponent = element.components['vr-book'];
             if (bookComponent && bookComponent.isGrabbed) {
                 return; // Skip floating animation for grabbed books
             }
-            
+
             // Create subtle floating animation
             const floatAmount = 0.01; // How much to float (in units)
             const speed = 0.8; // Animation speed
-            
+
             // Calculate floating offset using sine wave
             const floatY = Math.sin(this.time * speed + animationOffset) * floatAmount;
             const floatX = Math.cos(this.time * speed * 0.7 + animationOffset) * floatAmount * 0.3;
-            
+
             // Apply the floating animation to the position
             const newY = originalPos.y + floatY;
             const newX = originalPos.x + floatX;
-            
+
             element.setAttribute('position', `${newX} ${newY} ${originalPos.z}`);
         });
     },
