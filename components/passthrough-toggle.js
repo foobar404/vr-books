@@ -1,50 +1,44 @@
 AFRAME.registerComponent('passthrough-toggle', {
+  enabled: false,
   schema: {
-    // Event name to listen for on this element (e.g. 'gripdown')
     event: { type: 'string', default: 'xbuttondown' }
   },
-
+  saves: {},
+  envElm: null,
+  _lastToggle: 0,
   init() {
-    this._onToggle = this._onToggle.bind(this);
-    this.enabled = false;
-
-    if (this.data.event) {
-      this.el.addEventListener(this.data.event, this._onToggle);
-      this._listenedEvent = this.data.event;
-    }
+    this.el.addEventListener(this.data.event, this.toggle.bind(this));
   },
-  _onToggle() { this.toggle(); },
 
-  toggle() {
+  toggle(e) {
+    const now = Date.now();
+    if (now - (this._lastToggle || 0) < 500) return; // debounce 1s
+    this._lastToggle = now;
+
     if (this.enabled) this.disable();
     else this.enable();
   },
 
   enable() {
-    const renderer = this.el.sceneEl && this.el.sceneEl.renderer;
-    const canvas = renderer && renderer.domElement;
-    if (canvas) {
-      canvas.style.background = 'transparent';
-      canvas.style.backgroundColor = 'transparent';
-    }
-    if (this.el && this.el.sceneEl) this.el.sceneEl.style.background = 'transparent';
+    this.envElm = document.querySelector("[environment]");
+
+    this.saves["environment"] = this.envElm.getAttribute("environment");
+    this.envElm.removeAttribute("environment");
+
     this.enabled = true;
-    this.el.emit('passthrough-enabled');
+    this._triggerHaptic({ intensity: 0.7, duration: 40 });
   },
 
   disable() {
-    const renderer = this.el.sceneEl && this.el.sceneEl.renderer;
-    const canvas = renderer && renderer.domElement;
-    if (canvas) {
-      canvas.style.background = '';
-      canvas.style.backgroundColor = '';
-    }
-    if (this.el && this.el.sceneEl) this.el.sceneEl.style.background = '';
+    this.envElm.setAttribute("environment", this.saves["environment"])
+
     this.enabled = false;
-    this.el.emit('passthrough-disabled');
+    this._triggerHaptic({ intensity: 0.5, duration: 30 });
   },
 
-  remove() {
-    if (this._listenedEvent) this.el.removeEventListener(this._listenedEvent, this._onToggle);
+  _triggerHaptic(options) {
+    const scene = this.el.sceneEl || document.querySelector('a-scene');
+    const controllers = scene?.querySelectorAll('[haptics]');
+    controllers?.forEach(c => c.emit('haptic-pulse', options));
   }
 });

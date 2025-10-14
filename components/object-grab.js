@@ -87,7 +87,8 @@ AFRAME.registerComponent('object-grab', {
   },
 
   onGripDown: function() {
-    this.grabFromRaycaster(false); // Snap to origin mode
+    // Grip now acts like the old trigger: move-from-current-position mode
+    this.grabFromRaycaster(true);
   },
 
   onGripUp: function() {
@@ -95,7 +96,8 @@ AFRAME.registerComponent('object-grab', {
   },
 
   onTriggerDown: function() {
-    this.grabFromRaycaster(true); // Move from current position mode
+    // Trigger now acts like the old grip: snap-to-controller origin mode
+    this.grabFromRaycaster(false);
   },
 
   onTriggerUp: function() {
@@ -150,6 +152,7 @@ AFRAME.registerComponent('object-grab', {
     
     // Emit events
     entity.emit('grab-start', { hand: this.el });
+    this.el.emit('haptic-pulse', { intensity: 0.5, duration: 25 });
     console.log(moveFromCurrentPos ? 'Moving from current position:' : 'Grabbed:', entity);
     // reset axis so scaling doesn't jump
     this.lastAxisY = 0;
@@ -165,6 +168,7 @@ AFRAME.registerComponent('object-grab', {
     
     // Emit events
     entity.emit('grab-end', { hand: this.el });
+    this.el.emit('haptic-pulse', { intensity: 0.4, duration: 20 });
     console.log('Released:', entity);
     
     // Reset state
@@ -173,9 +177,7 @@ AFRAME.registerComponent('object-grab', {
     this.isMovingFromCurrentPos = false;
     this.grabPositionOffset.set(0, 0, 0);
     this.lastAxisY = 0;
-  }
-
-  ,
+  },
   onAxisMove: function(evt) {
     // event.detail.axis is usually an array [x, y]
     const d = evt && evt.detail;

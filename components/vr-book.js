@@ -8,9 +8,8 @@ AFRAME.registerComponent("vr-book", {
   chapters: [],
   wordsPerPage: 200,
   schema: {
-    bookPath: { type: 'string', default: '' },
-    // Optional asset id to load from <a-assets>. If present, it takes precedence over bookPath
-    assetId: { type: 'string', default: '' }
+    assetId: { type: 'string', default: '' },
+
   },
   init: function () {
     this.bookContainer = document.createElement('a-entity');
@@ -21,14 +20,14 @@ AFRAME.registerComponent("vr-book", {
     this.isGrabbed = false;
     this.el.appendChild(this.bookContainer);
 
-  // Hover state handlers
-  this.isHovered = false;
-  this._onRayIntersect = this._onRayIntersect.bind(this);
-  this._onRayIntersectCleared = this._onRayIntersectCleared.bind(this);
-  // Axis (joystick) handling for page turning
-  this._onAxisMove = this._onAxisMove.bind(this);
-  this._lastAxisSign = 0;
-  this._lastFlipTime = 0;
+    // Hover state handlers
+    this.isHovered = false;
+    this._onRayIntersect = this._onRayIntersect.bind(this);
+    this._onRayIntersectCleared = this._onRayIntersectCleared.bind(this);
+    // Axis (joystick) handling for page turning
+    this._onAxisMove = this._onAxisMove.bind(this);
+    this._lastAxisSign = 0;
+    this._lastFlipTime = 0;
 
     this.setupEvents();
 
@@ -59,82 +58,48 @@ AFRAME.registerComponent("vr-book", {
   },
 
   loadEpub: async function () {
-    // Resolve book source: assetId in <a-assets> takes precedence
-    let src = '';
-    if (this.data.assetId) {
-      const assetEl = document.getElementById(this.data.assetId);
-      if (assetEl) src = assetEl.getAttribute('src') || '';
-    }
-    if (!src) src = this.data.bookPath || '';
+    const assetEl = this.data.assetId && document.getElementById(this.data.assetId);
+    const src = (assetEl && assetEl.getAttribute('src')) || this.data.bookPath || '';
     if (!src) return;
+
+    this.title = 'Unknown Title';
+    this.author = 'Unknown Author';
 
     try {
       this.epub = ePub(src);
       await this.epub.ready;
 
-      // metadata
-      try {
-        const metadata = await this.epub.loaded.metadata;
-        this.title = metadata.title || 'Unknown Title';
-        this.author = metadata.creator || 'Unknown Author';
-      } catch (e) {
-        this.title = this.title || 'Unknown Title';
-        this.author = this.author || 'Unknown Author';
-      }
+      const metadata = await this.epub.loaded.metadata.catch(() => ({}));
+      this.title = metadata.title || this.title;
+      this.author = metadata.creator || this.author;
 
-      // cover
-      try {
-        const cover = await this.epub.loaded.cover;
-        if (cover) {
-          const url = await this.epub.archive.createUrl(cover, { base64: false });
-          this.coverImageUrl = url;
-        }
-      } catch (e) {
-        // no cover
-      }
+      const cover = await this.epub.loaded.cover.catch(() => null);
+      if (cover) this.coverImageUrl = await this.epub.archive.createUrl(cover, { base64: false });
 
-      // load spine content
       const items = this.epub.spine.spineItems || [];
-      const chapters = await Promise.all(items.map(async (item, i) => {
+      this.chapters = await Promise.all(items.map(async (item, i) => {
         try {
           const doc = await this.epub.load(item.href);
-          // extract text
-          let text = '';
-          if (doc.body) text = (doc.body.textContent || '').trim();
-          if (!text) text = (doc.textContent || doc.innerText || '').trim();
-          text = text.replace(/\s+/g, ' ');
-
-          // chapter title
-          let chapterTitle = item.label || `Chapter ${i + 1}`;
-          const tEl = doc.querySelector && doc.querySelector('h1,h2,h3,title');
-          if (tEl && tEl.textContent) chapterTitle = tEl.textContent.trim();
-
-          return { title: chapterTitle, text };
-        } catch (err) {
+          const text = ((doc.body?.textContent || doc.textContent || doc.innerText || '').trim()).replace(/\s+/g, ' ');
+          const tEl = doc.querySelector?.('h1,h2,h3,title');
+          const title = tEl?.textContent.trim() || item.label || `Chapter ${i + 1}`;
+          return { title, text };
+        } catch {
           return { title: `Chapter ${i + 1}`, text: '' };
         }
       }));
 
-      this.chapters = chapters;
-      this.bookText = chapters.map(c => c.text).join(' ');
-      this.calculateTotalPages();
-      this.createBook();
-      // Clamp restored page
-      if (this.currentPage >= this.totalPages) this.currentPage = Math.max(0, this.totalPages - 1);
-      this.createPages();
-      this.savePage();
-      if (this.coverImageUrl) this.updateCoverImage();
+      this.bookText = this.chapters.map(c => c.text).join(' ');
     } catch (err) {
       console.warn('Failed to load EPUB', err);
-      this.title = this.title || 'Unknown Title';
-      this.author = this.author || 'Unknown Author';
-      this.bookText = this.bookText || '';
-      this.createBook();
-      // ensure saved page does not exceed total when load fails
-      if (this.currentPage >= (this.totalPages || 1)) this.currentPage = Math.max(0, (this.totalPages || 1) - 1);
-      this.createPages();
-      this.savePage();
     }
+
+    this.calculateTotalPages();
+    this.currentPage = Math.min(this.currentPage, Math.max(0, (this.totalPages || 1) - 1));
+    this.createBook();
+    this.createPages();
+    this.savePage();
+    if (this.coverImageUrl) this.updateCoverImage();
   },
 
   createBook: function () {
@@ -146,13 +111,43 @@ AFRAME.registerComponent("vr-book", {
 
   createBody: function () {
     const geometry = new THREE.BoxGeometry(this.bookWidth, this.bookHeight, this.bookThickness);
+
+    // Load textures from assets
+    const textureLoader = new THREE.TextureLoader();
+
+    // Book material for spine/back
+    const bookNormalMap = new THREE.Texture(document.getElementById('book-fabric-normal'));
+    const bookRoughnessMap = new THREE.Texture(document.getElementById('book-fabric-roughness'));
+    const bookMaterial = new THREE.MeshStandardMaterial({
+      color: 0x8B4513,
+      normalMap: bookNormalMap,
+      roughnessMap: bookRoughnessMap,
+      roughness: 0.8
+    });
+    bookNormalMap.needsUpdate = true;
+    bookRoughnessMap.needsUpdate = true;
+
+    // Pages material for exposed paper edges
+    const pagesDiffuseMap = new THREE.Texture(document.getElementById('paper-diffuse'));
+    const pagesNormalMap = new THREE.Texture(document.getElementById('paper-normal'));
+    const pagesRoughnessMap = new THREE.Texture(document.getElementById('paper-roughness'));
+    const pagesMaterial = new THREE.MeshStandardMaterial({
+      map: pagesDiffuseMap,
+      normalMap: pagesNormalMap,
+      roughnessMap: pagesRoughnessMap,
+      roughness: 0.7
+    });
+    pagesDiffuseMap.needsUpdate = true;
+    pagesNormalMap.needsUpdate = true;
+    pagesRoughnessMap.needsUpdate = true;
+
     const materials = [
-      new THREE.MeshBasicMaterial({ color: 0xFFFFF0 }), // right pages
-      new THREE.MeshBasicMaterial({ color: 0x8B4513 }), // left pages  
-      new THREE.MeshBasicMaterial({ color: 0xFFFFF0 }), // top
-      new THREE.MeshBasicMaterial({ color: 0xFFFFF0 }), // bottom
-      new THREE.MeshBasicMaterial({ color: 0xFFFFF0 }), // front
-      new THREE.MeshBasicMaterial({ color: 0x8B4513 })  // back spine
+      pagesMaterial, // right pages (exposed edge)
+      bookMaterial, // left spine with book texture
+      pagesMaterial, // top (exposed edge)
+      pagesMaterial, // bottom (exposed edge)
+      new THREE.MeshBasicMaterial({ color: 0xFFFFF0 }), // front (for text canvas)
+      bookMaterial  // back spine with book texture
     ];
     this.bookContainer.setObject3D('body', new THREE.Mesh(geometry, materials));
   },
@@ -227,14 +222,7 @@ AFRAME.registerComponent("vr-book", {
   },
 
   addAuthorLabel: function () {
-    // Reuse existing label if present to avoid duplicates when recreating the book
-    if (this.authorLabelEl) {
-      this.authorLabelEl.setAttribute('value', this.author || 'Unknown');
-      return;
-    }
-
-    // Try to find an existing label in case one was added outside this instance
-    const existing = this.bookContainer.querySelector('[data-author-label]');
+    const existing = this.authorLabelEl || this.bookContainer.querySelector('[data-author-label]');
     if (existing) {
       existing.setAttribute('value', this.author || 'Unknown');
       this.authorLabelEl = existing;
@@ -254,75 +242,45 @@ AFRAME.registerComponent("vr-book", {
   },
 
   calculateTotalPages: function () {
-    if (!this.bookText) {
-      this.totalPages = 1;
-      return;
-    }
-
-    const words = this.bookText.split(/\s+/).filter(word => word.length > 0);
-
+    const words = (this.bookText || '').split(/\s+/).filter(w => w.length);
     this.totalPages = Math.max(1, Math.ceil(words.length / this.wordsPerPage));
   },
 
   getPageContent: function () {
-    if (!this.bookText || this.bookText.length === 0) {
-      return {
-        title: 'Loading...',
-        text: 'Loading content...'
-      };
-    }
-
-    const words = this.bookText.split(/\s+/).filter(word => word.length > 0);
-
-    if (words.length === 0) {
-      return {
-        title: 'Error',
-        text: 'No content available.'
-      };
-    }
+    const words = (this.bookText || '').split(/\s+/).filter(w => w.length);
+    if (!words.length) return { title: 'Loading...', text: 'Loading content...' };
 
     const startWord = this.currentPage * this.wordsPerPage;
     const endWord = Math.min(startWord + this.wordsPerPage, words.length);
+    const pageText = words.slice(startWord, endWord).join(' ');
 
-    const pageWords = words.slice(startWord, endWord);
-    const pageText = pageWords.join(' ');
-
-    // Find which chapter this page belongs to
     let currentChapter = 'Chapter 1';
     let wordsProcessed = 0;
-
-    for (let i = 0; i < this.chapters.length; i++) {
-      const chapterWords = this.chapters[i].text.split(/\s+/).filter(word => word.length > 0);
-
+    for (const chapter of this.chapters) {
+      const chapterWords = chapter.text.split(/\s+/).filter(w => w.length);
       if (startWord < wordsProcessed + chapterWords.length) {
-        currentChapter = this.chapters[i].title;
+        currentChapter = chapter.title;
         break;
       }
       wordsProcessed += chapterWords.length;
     }
 
-    return {
-      title: currentChapter,
-      epubContent: pageText
-    };
+    return { title: currentChapter, epubContent: pageText };
   },
 
   wrapText: function (ctx, text, maxWidth) {
-    if (!text || typeof text !== 'string') {
-      return ['No content available'];
-    }
-
+    if (!text) return ['No content available'];
     const words = text.split(' ');
     const lines = [];
     let line = words[0] || '';
 
     for (let i = 1; i < words.length; i++) {
-      const testLine = line + ' ' + words[i];
-      if (ctx.measureText(testLine).width > maxWidth) {
+      const test = `${line} ${words[i]}`;
+      if (ctx.measureText(test).width > maxWidth) {
         lines.push(line);
         line = words[i];
       } else {
-        line = testLine;
+        line = test;
       }
     }
     if (line) lines.push(line);
@@ -330,29 +288,20 @@ AFRAME.registerComponent("vr-book", {
   },
 
   setupEvents: function () {
-    // Page navigation events
+    const scene = document.querySelector('a-scene');
+
     document.addEventListener('keydown', (e) => {
       if (e.key === 'b') this.nextPage();
       if (e.key === 'v') this.prevPage();
     });
-    // Use joystick left/right while a controller ray is intersecting this book
-    document.addEventListener('axismove', this._onAxisMove);
-    document.addEventListener('thumbstickmoved', this._onAxisMove);
 
-    // Listen for grab events to update floating animation state
-    this.bookContainer.addEventListener('grab-start', (evt) => {
-      this.isGrabbed = true;
-    });
+    scene.addEventListener('axismove', this._onAxisMove);
+    scene.addEventListener('thumbstickmoved', this._onAxisMove);
 
-    this.bookContainer.addEventListener('grab-end', (evt) => {
-      this.isGrabbed = false;
-    });
-
-    // Raycaster hover events (controllers will emit these when intersecting)
-    // Use bookContainer because raycasters intersect the visible entity
+    this.bookContainer.addEventListener('grab-start', () => this.isGrabbed = true);
+    this.bookContainer.addEventListener('grab-end', () => this.isGrabbed = false);
     this.bookContainer.addEventListener('raycaster-intersected', this._onRayIntersect);
     this.bookContainer.addEventListener('raycaster-intersected-cleared', this._onRayIntersectCleared);
-    // Also support cursor mouseenter/mouseleave for desktop testing
     this.bookContainer.addEventListener('mouseenter', this._onRayIntersect);
     this.bookContainer.addEventListener('mouseleave', this._onRayIntersectCleared);
   },
@@ -364,15 +313,37 @@ AFRAME.registerComponent("vr-book", {
       const detail = evt && evt.detail;
       const axes = detail && (detail.axis || detail.axes) || [];
       const x = Array.isArray(axes) ? axes[0] : (axes && axes.x) || 0;
-      const controller = evt && evt.target;
-      if (!controller) return;
 
-      // Ensure this controller's raycaster currently intersects this bookContainer
-      const rc = controller.components && controller.components.raycaster;
-      if (!rc) return;
-      const intersected = rc.intersectedEls || rc.intersected || [];
-      // intersectedEls may contain either the bookContainer or the parent element; check both
-      const hit = intersected.indexOf(this.bookContainer) !== -1 || intersected.indexOf(this.el) !== -1;
+      // Try to get the controller from the event target. If not available or it has no raycaster,
+      // fall back to scanning scene controllers for one whose raycaster intersects this book.
+      let controller = evt && evt.target;
+      let rc = controller && controller.components && controller.components.raycaster;
+
+      let hit = false;
+      if (rc) {
+        const intersected = rc.intersectedEls || rc.intersected || [];
+        hit = (Array.isArray(intersected) && (intersected.includes(this.bookContainer) || intersected.includes(this.el)));
+      }
+
+      if (!hit) {
+        // scan all controllers in the scene that have a raycaster
+        const scene = this.el.sceneEl || document.querySelector('a-scene');
+        if (scene) {
+          const controllers = scene.querySelectorAll('[raycaster]');
+          for (const c of controllers) {
+            const r = c.components && c.components.raycaster;
+            if (!r) continue;
+            const inter = r.intersectedEls || r.intersected || [];
+            if (Array.isArray(inter) && (inter.includes(this.bookContainer) || inter.includes(this.el))) {
+              controller = c;
+              rc = r;
+              hit = true;
+              break;
+            }
+          }
+        }
+      }
+
       if (!hit) return;
 
       const now = Date.now();
@@ -399,15 +370,11 @@ AFRAME.registerComponent("vr-book", {
     }
   },
 
-  // Ray hover handlers
-  _onRayIntersect: function (evt) {
-    this.isHovered = true
+  _onRayIntersect: function () {
+    if (!this.isHovered) this._triggerHaptic({ intensity: 0.2, duration: 15 });
+    this.isHovered = true;
   },
-
-  _onRayIntersectCleared: function (evt) {
-    // Clear hover state when ray leaves
-    this.isHovered = false;
-  },
+  _onRayIntersectCleared: function () { this.isHovered = false; },
 
   nextPage: function () {
     const maxPages = this.totalPages || 100;
@@ -415,6 +382,7 @@ AFRAME.registerComponent("vr-book", {
       this.currentPage++;
       this.createPages();
       this.savePage();
+      this._triggerHaptic({ intensity: 0.3, duration: 20 });
     }
   },
 
@@ -423,15 +391,19 @@ AFRAME.registerComponent("vr-book", {
       this.currentPage--;
       this.createPages();
       this.savePage();
+      this._triggerHaptic({ intensity: 0.3, duration: 20 });
     }
   },
 
+  _triggerHaptic: function (options) {
+    const scene = this.el.sceneEl || document.querySelector('a-scene');
+    const controllers = scene?.querySelectorAll('[haptics]');
+    controllers?.forEach(c => c.emit('haptic-pulse', options));
+  },
+
   savePage: function () {
-    if (!this.storageKey) return;
-    try {
-      localStorage.setItem(this.storageKey, String(this.currentPage));
-    } catch (e) {
-      // ignore storage errors
+    if (this.storageKey) {
+      try { localStorage.setItem(this.storageKey, String(this.currentPage)); } catch (e) { }
     }
   },
 
@@ -454,17 +426,12 @@ AFRAME.registerComponent("vr-book", {
     }
   },
   remove: function () {
-    try {
-      window.removeEventListener('beforeunload', this._onBeforeUnload);
-    } catch (e) { }
-    // Clean up hover listeners
-    try {
-      if (this.bookContainer) {
-        this.bookContainer.removeEventListener('raycaster-intersected', this._onRayIntersect);
-        this.bookContainer.removeEventListener('raycaster-intersected-cleared', this._onRayIntersectCleared);
-        this.bookContainer.removeEventListener('mouseenter', this._onRayIntersect);
-        this.bookContainer.removeEventListener('mouseleave', this._onRayIntersectCleared);
-      }
-    } catch (e) { }
+    window.removeEventListener('beforeunload', this._onBeforeUnload);
+    if (this.bookContainer) {
+      this.bookContainer.removeEventListener('raycaster-intersected', this._onRayIntersect);
+      this.bookContainer.removeEventListener('raycaster-intersected-cleared', this._onRayIntersectCleared);
+      this.bookContainer.removeEventListener('mouseenter', this._onRayIntersect);
+      this.bookContainer.removeEventListener('mouseleave', this._onRayIntersectCleared);
+    }
   }
 });
