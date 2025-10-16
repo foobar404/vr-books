@@ -4,25 +4,19 @@ AFRAME.registerComponent("vr-library", {
     rowMax: 5,
     bookSpace: .24,
     libraryElm: null,
-    schema: {
-        booksPath: { type: 'string', default: '/books/manifest.json' }
-    },
     init: function () {
         this.libraryElm = document.createElement("a-entity");
         this.el.appendChild(this.libraryElm); // Append to the scene
         this.isVisible = true; // Track visibility state
+        this._lastToggleTime = 0; // timestamp for debounce
         this.bookElements = []; // Store book elements for animation
         this.time = 0; // Animation time
 
-        // Bind event handlers
-        this.toggleVisibility = this.toggleVisibility.bind(this);
-        this.onKeyDown = this.onKeyDown.bind(this);
-
         // Listen for keyboard events
-        document.addEventListener('keydown', this.onKeyDown);
+        document.addEventListener('keydown', (e) => { if (e.key.toLowerCase() === 'h') this.toggleVisibility(); });
 
         // Listen for VR controller events
-        document.addEventListener('xbuttondown', this.toggleVisibility);
+        document.addEventListener('bbuttondown', this.toggleVisibility.bind(this));
 
         const scene = this.el.sceneEl
         const assetItems = scene.querySelectorAll('a-asset-item');
@@ -46,10 +40,7 @@ AFRAME.registerComponent("vr-library", {
         }
     },
     addBook: function (book) {
-        // book can be a string (src) or an object { assetId, src }
-        this.books.push(book);
-
-        const bookIndex = this.books.length - 1;
+        const bookIndex = this.bookElements.length;
 
         // Calculate grid position
         const row = Math.floor(bookIndex / this.rowMax);
@@ -61,14 +52,7 @@ AFRAME.registerComponent("vr-library", {
 
         let bookElm = document.createElement("a-entity");
         bookElm.setAttribute("position", `${x} ${y} 0`);
-        // If caller provided an assetId, prefer that so vr-book loads from <a-assets>
-        if (typeof book === 'object' && book.assetId) {
-            bookElm.setAttribute('vr-book', { assetId: book.assetId });
-        } else if (typeof book === 'object' && book.src) {
-            bookElm.setAttribute('vr-book', { bookPath: book.src });
-        } else {
-            bookElm.setAttribute('vr-book', { bookPath: book });
-        }
+        bookElm.setAttribute('vr-book', { assetId: book.assetId });
 
         // Store book element and original position for animation
         this.bookElements.push({
@@ -77,13 +61,42 @@ AFRAME.registerComponent("vr-library", {
             animationOffset: Math.random() * Math.PI * 2 // Random phase offset
         });
 
+        // Support both VR controller trigger events and desktop clicks
+        bookElm.addEventListener('selected', (e) => this.moveBookToScene(bookElm, e));
+
         this.libraryElm.appendChild(bookElm);
     },
 
-    tick: function (time, timeDelta) {
-        // Floating animation temporarily disabled to fix dragging issues
-        // TODO: Re-enable with proper grab state detection
+    /**
+     * Move a book element out of the library and append it to the scene root.
+     * Also remove it from internal arrays so the library no longer animates or manages it.
+     */
+    moveBookToScene: function (bookElm, triggerEvent) {
+        if (!bookElm || !this.libraryElm) return;
 
+        // Remove listeners attached by the library
+        if (bookElm._vrLibraryTriggerHandler) {
+            bookElm.removeEventListener('triggerdown', bookElm._vrLibraryTriggerHandler);
+            bookElm.removeEventListener('click', bookElm._vrLibraryTriggerHandler);
+            delete bookElm._vrLibraryTriggerHandler;
+        }
+
+        bookElm.setAttribute("vr-book", { active: true });
+        // Remove by matching the element reference
+        this.bookElements = this.bookElements.filter(bd => bd.element !== bookElm);
+        return;
+
+        // Remove from library DOM
+        if (bookElm.parentElement === this.libraryElm) {
+            this.libraryElm.removeChild(bookElm);
+        }
+
+        // Append to scene root so it becomes part of the world
+        const parent = document.querySelector('#camera-rig');
+        parent.appendChild(bookElm);
+    },
+
+    tick: function (time, timeDelta) {
         // Update animation time
         this.time += timeDelta * 0.001; // Convert to seconds
 
@@ -113,21 +126,13 @@ AFRAME.registerComponent("vr-library", {
         });
     },
 
-    onKeyDown: function (event) {
-        // Check if 'h' key was pressed
-        if (event.key === 'h' || event.key === 'H') {
-            this.toggleVisibility();
-        }
-    },
-
     toggleVisibility: function () {
+        const now = Date.now();
+        const cooldown = 250; // ms
+        if (now - this._lastToggleTime < cooldown) return; // ignore rapid toggles
+        this._lastToggleTime = now;
         this.isVisible = !this.isVisible;
-
-        if (this.isVisible) {
-            this.libraryElm.setAttribute('visible', true);
-        } else {
-            this.libraryElm.setAttribute('visible', false);
-        }
+        this.libraryElm.setAttribute('visible', this.isVisible);
     },
 
     remove: function () {

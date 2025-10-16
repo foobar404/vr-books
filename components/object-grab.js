@@ -7,7 +7,7 @@ AFRAME.registerComponent('object-grab', {
     moveReleaseButton: { type: 'string', default: 'triggerup' }
   },
 
-  init: function() {
+  init: function () {
     this.grabbedEntity = null;
     this.originalParent = null;
     this.grabRotationOffset = new THREE.Quaternion();
@@ -17,7 +17,7 @@ AFRAME.registerComponent('object-grab', {
     this.lastAxisY = 0;
     this.scaleThreshold = 0.12; // deadzone for joystick
     this.onAxisMove = this.onAxisMove.bind(this);
-    
+
     // Bind event handlers
     this.onGripDown = this.onGripDown.bind(this);
     this.onGripUp = this.onGripUp.bind(this);
@@ -25,18 +25,18 @@ AFRAME.registerComponent('object-grab', {
     this.onTriggerUp = this.onTriggerUp.bind(this);
   },
 
-  tick: function() {
+  tick: function () {
     if (this.grabbedEntity) {
       const controllerPos = new THREE.Vector3();
       const controllerRot = new THREE.Quaternion();
-      
+
       this.el.object3D.getWorldPosition(controllerPos);
       this.el.object3D.getWorldQuaternion(controllerRot);
-      
+
       // Apply rotation offset
       const finalRotation = new THREE.Quaternion();
       finalRotation.multiplyQuaternions(controllerRot, this.grabRotationOffset);
-      
+
       if (this.isMovingFromCurrentPos) {
         // Trigger mode: maintain position offset from controller
         const finalPosition = new THREE.Vector3();
@@ -46,7 +46,7 @@ AFRAME.registerComponent('object-grab', {
         // Grip mode: object origin follows controller exactly
         this.grabbedEntity.object3D.position.copy(controllerPos);
       }
-      
+
       this.grabbedEntity.object3D.quaternion.copy(finalRotation);
     }
     // Apply joystick scaling when an object is grabbed
@@ -67,9 +67,9 @@ AFRAME.registerComponent('object-grab', {
     }
   },
 
-  play: function() {
-    this.el.addEventListener(this.data.grabButton, this.onGripDown);
-    this.el.addEventListener(this.data.releaseButton, this.onGripUp);
+  play: function () {
+    // this.el.addEventListener(this.data.grabButton, this.onGripDown);
+    // this.el.addEventListener(this.data.releaseButton, this.onGripUp);
     this.el.addEventListener(this.data.moveButton, this.onTriggerDown);
     this.el.addEventListener(this.data.moveReleaseButton, this.onTriggerUp);
     // axis events for joystick/thumbstick
@@ -77,7 +77,7 @@ AFRAME.registerComponent('object-grab', {
     this.el.addEventListener('thumbstickmoved', this.onAxisMove);
   },
 
-  pause: function() {
+  pause: function () {
     this.el.removeEventListener(this.data.grabButton, this.onGripDown);
     this.el.removeEventListener(this.data.releaseButton, this.onGripUp);
     this.el.removeEventListener(this.data.moveButton, this.onTriggerDown);
@@ -86,91 +86,86 @@ AFRAME.registerComponent('object-grab', {
     this.el.removeEventListener('thumbstickmoved', this.onAxisMove);
   },
 
-  onGripDown: function() {
+  onGripDown: function () {
     // Grip now acts like the old trigger: move-from-current-position mode
     this.grabFromRaycaster(true);
   },
 
-  onGripUp: function() {
+  onGripUp: function () {
     this.releaseEntity();
   },
 
-  onTriggerDown: function() {
+  onTriggerDown: function () {
     // Trigger now acts like the old grip: snap-to-controller origin mode
     this.grabFromRaycaster(false);
   },
 
-  onTriggerUp: function() {
+  onTriggerUp: function () {
     this.releaseEntity();
   },
 
-  grabFromRaycaster: function(moveFromCurrentPos) {
+  grabFromRaycaster: function (moveFromCurrentPos) {
     const raycaster = this.el.components.raycaster;
     if (!raycaster?.intersectedEls.length) return;
 
-    // Find first grabbable entity
     for (const entity of raycaster.intersectedEls) {
-      if (entity.hasAttribute('grabbable')) {
-        this.grabEntity(entity, moveFromCurrentPos);
-        break;
-      }
+      this.grabEntity(entity, moveFromCurrentPos);
     }
   },
 
-  grabEntity: function(entity, moveFromCurrentPos = false) {
+  grabEntity: function (entity, moveFromCurrentPos = false) {
     if (this.grabbedEntity) return;
 
     this.grabbedEntity = entity;
     this.originalParent = entity.object3D.parent;
     this.isMovingFromCurrentPos = moveFromCurrentPos;
-    
+
     // Calculate rotation offset
     const controllerRot = new THREE.Quaternion();
     const entityRot = new THREE.Quaternion();
-    
+
     this.el.object3D.getWorldQuaternion(controllerRot);
     entity.object3D.getWorldQuaternion(entityRot);
-    
+
     this.grabRotationOffset.copy(entityRot).premultiply(controllerRot.invert());
-    
+
     if (moveFromCurrentPos) {
       // Trigger mode: calculate position offset to maintain current position
       const controllerPos = new THREE.Vector3();
       const entityPos = new THREE.Vector3();
-      
+
       this.el.object3D.getWorldPosition(controllerPos);
       entity.object3D.getWorldPosition(entityPos);
-      
+
       this.grabPositionOffset.copy(entityPos).sub(controllerPos);
     } else {
       // Grip mode: no position offset (snap to controller)
       this.grabPositionOffset.set(0, 0, 0);
     }
-    
+
     // Detach from parent to work in world space
     this.el.sceneEl.object3D.attach(entity.object3D);
-    
+
     // Emit events
     entity.emit('grab-start', { hand: this.el });
     this.el.emit('haptic-pulse', { intensity: 0.5, duration: 25 });
-    console.log(moveFromCurrentPos ? 'Moving from current position:' : 'Grabbed:', entity);
     // reset axis so scaling doesn't jump
     this.lastAxisY = 0;
   },
 
-  releaseEntity: function() {
+  releaseEntity: function () {
     if (!this.grabbedEntity) return;
 
     const entity = this.grabbedEntity;
-    
+
     // Reattach to original parent
     this.originalParent.attach(entity.object3D);
-    
+
     // Emit events
     entity.emit('grab-end', { hand: this.el });
     this.el.emit('haptic-pulse', { intensity: 0.4, duration: 20 });
     console.log('Released:', entity);
-    
+
     // Reset state
     this.grabbedEntity = null;
     this.originalParent = null;
@@ -178,7 +173,7 @@ AFRAME.registerComponent('object-grab', {
     this.grabPositionOffset.set(0, 0, 0);
     this.lastAxisY = 0;
   },
-  onAxisMove: function(evt) {
+  onAxisMove: function (evt) {
     // event.detail.axis is usually an array [x, y]
     const d = evt && evt.detail;
     if (!d) return;
