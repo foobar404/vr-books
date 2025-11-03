@@ -4,8 +4,7 @@ Experience your favorite ebooks in immersive XR. Browse our free public domain l
 
 ## Demo Video
 
-<!-- [![XR Books Demo](assets/github/screenshot-1.jpg)](assets/github/demo.mov) -->
-<video src="./assets/github/demo-video.mp4"></video>
+[![XR Books Demo](assets/github/screenshot-1.jpg)](assets/github/demo.mp4)
 
 ## Screenshots
 
