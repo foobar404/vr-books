@@ -4,19 +4,26 @@ AFRAME.registerComponent('object-grab', {
     grabButton: { type: 'string', default: 'gripdown' },
     releaseButton: { type: 'string', default: 'gripup' },
     moveButton: { type: 'string', default: 'triggerdown' },
-    moveReleaseButton: { type: 'string', default: 'triggerup' }
+    moveReleaseButton: { type: 'string', default: 'triggerup' },
+    minDistance: { type: 'number', default: 0.05 },
+    maxDistance: { type: 'number', default: 5 },
+    distanceAdjustSpeed: { type: 'number', default: 1.0 },
+    scaleSpeed: { type: 'number', default: 0.8 },
+    minScale: { type: 'number', default: 0.05 },
+    maxScale: { type: 'number', default: 5 }
   },
 
   init: function () {
     this.grabbedEntity = null;
-    this.originalParent = null;
     this.grabRotationOffset = new THREE.Quaternion();
-    this.grabPositionOffset = new THREE.Vector3();
-    this.isMovingFromCurrentPos = false;
+    this.controllerRotationOffset = new THREE.Quaternion();
     // scaling via joystick
     this.lastAxisY = 0;
     this.scaleThreshold = 0.12; // deadzone for joystick
     this.onAxisMove = this.onAxisMove.bind(this);
+
+    // distance control for ray-based placement
+    this.grabDistance = 0.15; // meters
 
     // Bind event handlers
     this.onGripDown = this.onGripDown.bind(this);
@@ -25,30 +32,36 @@ AFRAME.registerComponent('object-grab', {
     this.onTriggerUp = this.onTriggerUp.bind(this);
   },
 
-  tick: function () {
+  tick: function (time, timeDelta) {
     if (this.grabbedEntity) {
-      const controllerPos = new THREE.Vector3();
-      const controllerRot = new THREE.Quaternion();
+      const raycaster = this.el.components.raycaster?.raycaster;
+      if (!raycaster) return;
 
-      this.el.object3D.getWorldPosition(controllerPos);
-      this.el.object3D.getWorldQuaternion(controllerRot);
+      // Grab the ray's origin and direction
+      const origin = raycaster.ray.origin.clone();
+      const direction = raycaster.ray.direction.clone().normalize();
 
-      // Apply rotation offset
+      // Compute point 1 unit along the ray
+      const targetPos = origin.add(direction.multiplyScalar(this.grabDistance));
+
+      // Convert to grabbedEntity's parent's local space
+      this.grabbedEntity.object3D.parent.worldToLocal(targetPos);
+
+      // Apply position
+      this.grabbedEntity.object3D.position.copy(targetPos);
+
+      // Maintain rotation (optional)
+      const currentControllerQuat = new THREE.Quaternion();
+      this.el.object3D.getWorldQuaternion(currentControllerQuat);
+
+      const controllerDelta = new THREE.Quaternion();
+      controllerDelta.copy(currentControllerQuat).multiply(this.controllerRotationOffset.clone().invert());
+
       const finalRotation = new THREE.Quaternion();
-      finalRotation.multiplyQuaternions(controllerRot, this.grabRotationOffset);
-
-      if (this.isMovingFromCurrentPos) {
-        // Trigger mode: maintain position offset from controller
-        const finalPosition = new THREE.Vector3();
-        finalPosition.copy(controllerPos).add(this.grabPositionOffset);
-        this.grabbedEntity.object3D.position.copy(finalPosition);
-      } else {
-        // Grip mode: object origin follows controller exactly
-        this.grabbedEntity.object3D.position.copy(controllerPos);
-      }
-
+      finalRotation.multiplyQuaternions(controllerDelta, this.grabRotationOffset);
       this.grabbedEntity.object3D.quaternion.copy(finalRotation);
     }
+
     // Apply joystick scaling when an object is grabbed
     if (this.grabbedEntity && Math.abs(this.lastAxisY) > this.scaleThreshold) {
       // time-insensitive small steps; scaleSpeed tuned in schema
@@ -88,7 +101,7 @@ AFRAME.registerComponent('object-grab', {
 
   onGripDown: function () {
     // Grip now acts like the old trigger: move-from-current-position mode
-    this.grabFromRaycaster(true);
+    this.grabFromRaycaster();
   },
 
   onGripUp: function () {
@@ -96,61 +109,33 @@ AFRAME.registerComponent('object-grab', {
   },
 
   onTriggerDown: function () {
-    // Trigger now acts like the old grip: snap-to-controller origin mode
-    this.grabFromRaycaster(false);
+    // Trigger: place the grabbed object slightly in front of the controller and maintain that offset
+    this.grabFromRaycaster();
   },
 
   onTriggerUp: function () {
     this.releaseEntity();
   },
 
-  grabFromRaycaster: function (moveFromCurrentPos) {
+  grabFromRaycaster: function () {
     const raycaster = this.el.components.raycaster;
     if (!raycaster?.intersectedEls.length) return;
 
     for (const entity of raycaster.intersectedEls) {
-      this.grabEntity(entity, moveFromCurrentPos);
+      this.grabEntity(entity);
     }
   },
 
-  grabEntity: function (entity, moveFromCurrentPos = false) {
+  grabEntity: function (entity) {
     if (this.grabbedEntity) return;
 
     this.grabbedEntity = entity;
-    this.originalParent = entity.object3D.parent;
-    this.isMovingFromCurrentPos = moveFromCurrentPos;
-
-    // Calculate rotation offset
-    const controllerRot = new THREE.Quaternion();
-    const entityRot = new THREE.Quaternion();
-
-    this.el.object3D.getWorldQuaternion(controllerRot);
-    entity.object3D.getWorldQuaternion(entityRot);
-
-    this.grabRotationOffset.copy(entityRot).premultiply(controllerRot.invert());
-
-    if (moveFromCurrentPos) {
-      // Trigger mode: calculate position offset to maintain current position
-      const controllerPos = new THREE.Vector3();
-      const entityPos = new THREE.Vector3();
-
-      this.el.object3D.getWorldPosition(controllerPos);
-      entity.object3D.getWorldPosition(entityPos);
-
-      this.grabPositionOffset.copy(entityPos).sub(controllerPos);
-    } else {
-      // Grip mode: no position offset (snap to controller)
-      this.grabPositionOffset.set(0, 0, 0);
-    }
-
-    // Detach from parent to work in world space
-    this.el.sceneEl.object3D.attach(entity.object3D);
+    this.grabRotationOffset = entity.object3D.quaternion.clone();
+    this.controllerRotationOffset = this.el.object3D.quaternion.clone();
 
     // Emit events
     entity.emit('grab-start', { hand: this.el });
     this.el.emit('haptic-pulse', { intensity: 0.5, duration: 25 });
-    // reset axis so scaling doesn't jump
-    this.lastAxisY = 0;
   },
 
   releaseEntity: function () {
@@ -158,20 +143,14 @@ AFRAME.registerComponent('object-grab', {
 
     const entity = this.grabbedEntity;
 
-    // Reattach to original parent
-    this.originalParent.attach(entity.object3D);
-
     // Emit events
     entity.emit('grab-end', { hand: this.el });
     this.el.emit('haptic-pulse', { intensity: 0.4, duration: 20 });
-    console.log('Released:', entity);
 
     // Reset state
     this.grabbedEntity = null;
-    this.originalParent = null;
-    this.isMovingFromCurrentPos = false;
-    this.grabPositionOffset.set(0, 0, 0);
-    this.lastAxisY = 0;
+    this.grabRotationOffset.set(0, 0, 0);
+    this.controllerRotationOffset.set(0, 0, 0);
   },
   onAxisMove: function (evt) {
     // event.detail.axis is usually an array [x, y]
@@ -183,3 +162,4 @@ AFRAME.registerComponent('object-grab', {
     this.lastAxisY = typeof y === 'number' ? y : 0;
   }
 });
+

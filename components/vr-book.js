@@ -2,13 +2,13 @@ AFRAME.registerComponent("vr-book", {
   bookWidth: 0.15,
   bookHeight: 0.2,
   bookThickness: 0.02,
-  currentPage: 0,
+  currentPage: 1,
   epub: null,
   bookText: '',
   chapters: [],
   wordsPerPage: 200,
   schema: {
-    assetId: { type: 'string', default: '' },
+    bookPath: { type: "string", default: "" },
     active: { type: 'boolean', default: false }
   },
   init: function () {
@@ -18,6 +18,10 @@ AFRAME.registerComponent("vr-book", {
     this.bookContainer.setAttribute('geometry', `primitive: box; width: ${this.bookWidth}; height: ${this.bookHeight}; depth: ${this.bookThickness}`);
     this.bookContainer.setAttribute('material', 'color: red; opacity: 0; transparent: true');
     this.el.appendChild(this.bookContainer);
+    this.htmlCanvas = document.createElement("canvas");
+    this.htmlCanvasContext = this.htmlCanvas.getContext("2d");
+    this.outCanvas = document.createElement("canvas");
+    this.outContext = this.outCanvas.getContext("2d");
 
     // State
     this.isGrabbed = false;
@@ -33,13 +37,13 @@ AFRAME.registerComponent("vr-book", {
 
     this.setupEvents();
 
-    // Load saved page
-    this.storageKey = this.data.assetId ? `vr-book:${this.data.assetId}` : this.data.bookPath ? `vr-book:${this.data.bookPath}` : null;
-    if (this.storageKey) {
-      const saved = localStorage.getItem(this.storageKey);
-      const n = parseInt(saved, 10);
-      if (!isNaN(n) && n >= 0) this.currentPage = n;
-    }
+    // Load saved page. Use the provided bookPath (slug or path) as storage key.
+    // this.storageKey = `vr-book:${this.data.bookPath}`;
+    // if (this.storageKey) {
+    //   const saved = localStorage.getItem(this.storageKey);
+    //   const n = parseInt(saved, 10);
+    //   if (!isNaN(n) && n >= 0) this.currentPage = n;
+    // }
 
     this.createBook();
     this.loadEpub();
@@ -47,15 +51,12 @@ AFRAME.registerComponent("vr-book", {
   },
 
   loadEpub: async function () {
-    const assetEl = this.data.assetId && document.getElementById(this.data.assetId);
-    const src = (assetEl && assetEl.getAttribute('src')) || this.data.bookPath || '';
-    if (!src) return;
-
     this.title = 'Unknown Title';
     this.author = 'Unknown Author';
 
     try {
-      this.epub = ePub(src);
+      let assetEl = document.getElementById(this.data.bookPath);
+      this.epub = ePub(assetEl.data);
       await this.epub.ready;
 
       const metadata = await this.epub.loaded.metadata.catch(() => ({}));
@@ -63,29 +64,43 @@ AFRAME.registerComponent("vr-book", {
       this.author = metadata.creator || this.author;
 
       const cover = await this.epub.loaded.cover.catch(() => null);
-      if (cover) this.coverImageUrl = await this.epub.archive.createUrl(cover, { base64: false });
+      if (cover) this.coverImageUrl = await this.epub.archive.createUrl(cover, { base64: true });
 
       const items = this.epub.spine.spineItems || [];
-      this.chapters = await Promise.all(items.map(async (item, i) => {
+      this.sections = await Promise.all(items.map(async (item, i) => {
         const doc = await this.epub.load(item.href).catch(() => null);
-        if (!doc) return { title: `Chapter ${i + 1}`, text: '' };
-        const text = (doc.body?.textContent || doc.textContent || '').trim().replace(/\s+/g, ' ');
+        if (!doc) return { title: `Chapter ${i + 1}`, html: '' };
+        const html = doc.body?.innerHTML || doc.innerHTML || '';
         const tEl = doc.querySelector?.('h1,h2,h3,title');
         const title = tEl?.textContent.trim() || item.label || `Chapter ${i + 1}`;
-        return { title, text };
+        return { title, html };
       }));
 
-      this.bookText = this.chapters.map(c => c.text).join(' ');
+      this.paginateContent();
     } catch (err) {
       console.warn('Failed to load EPUB', err);
     }
 
-    this.calculateTotalPages();
     this.currentPage = Math.min(this.currentPage, Math.max(0, (this.totalPages || 1) - 1));
     this.createBook();
     this.createPages();
     this.savePage();
     if (this.coverImageUrl) this.updateCoverImage();
+  },
+
+  paginateContent: function () {
+    const pageHeight = 480;
+    const container = document.createElement('div');
+    // container.style.cssText = 'position:absolute;left:-9999px;width:472px;font-family:serif;font-size:14px;line-height:1.5;padding:20px;';
+    document.body.appendChild(container);
+
+    this.pages = [];
+    this.sections.forEach(section => {
+      this.pages.push({ section: section.title, html: section.html, offset: 0, pageHeight });
+    });
+
+    document.body.removeChild(container);
+    this.totalPages = this.pages.length || 1;
   },
 
   _loadTexture: function (id) {
@@ -109,8 +124,7 @@ AFRAME.registerComponent("vr-book", {
     const bookMaterial = new THREE.MeshStandardMaterial({
       color: 0x8B4513,
       normalMap: this._loadTexture('book-fabric-normal'),
-      roughnessMap: this._loadTexture('book-fabric-roughness'),
-      roughness: 0.8
+      roughness: 0.5
     });
 
     const pagesMaterial = new THREE.MeshStandardMaterial({
@@ -131,37 +145,80 @@ AFRAME.registerComponent("vr-book", {
     this.bookContainer.setObject3D('body', new THREE.Mesh(geometry, materials));
   },
 
-  createPages: function () {
-    const canvas = document.createElement('canvas');
-    canvas.width = canvas.height = 512;
-    const ctx = canvas.getContext('2d');
-    const content = this.getPageContent();
-    this.renderPageContent(ctx, content);
+  createPages: async function () {
+    const page = this.pages?.[this.currentPage];
+    if (!page) {
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = 512;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, 512, 512);
+      ctx.fillStyle = '#000';
+      ctx.font = '20px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('Loading...', 256, 256);
+      this.renderCanvas(canvas);
+      return;
+    }
+
+    console.log(this.currentPage);
+
+    const container = document.createElement('div');
+    // Ensure the container matches the expected page dimensions and hides overflow
+    container.style.cssText = `position:absolute;left:-9999px;width:472px;height:${page.pageHeight}px;overflow:hidden;font-family:serif;font-size:14px;line-height:1.5;padding:20px;background:#fff;`;
+    const content = document.createElement('div');
+    content.innerHTML = page.html;
+
+    container.appendChild(content);
+    document.body.appendChild(container);
+
+    let canvas = await html2canvas(container, {
+      backgroundColor: null,
+      useCORS: true,
+      allowTaint: true,
+    });
+
+    this.renderCanvas(canvas);
+
+    document.body.removeChild(container);
   },
 
-  renderPageContent: function (ctx, content) {
-    const canvas = ctx.canvas;
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(0, 0, 512, 512);
-    ctx.fillStyle = '#000';
-    ctx.font = 'bold 20px Arial';
-    ctx.textAlign = 'center';
-    ctx.fillText(content.title || 'Loading...', 256, 40);
+  // Dispose previous pages mesh/material/texture
+  disposePages: function () {
+    const prev = this.bookContainer.getObject3D('pages');
+    if (!prev) return;
+    // detach from scene container
+    // dispose geometry
+    try {
+      if (prev.geometry) prev.geometry.dispose();
+      const mat = prev.material;
+      if (mat) {
+        if (mat.map) {
+          try { mat.map.dispose(); } catch (e) { }
+          mat.map = null;
+        }
+        try { mat.dispose(); } catch (e) { }
+      }
+    } catch (e) {
+      console.warn('Error disposing previous page resources', e);
+    }
+    this.bookContainer.removeObject3D('pages');
+  },
 
-    ctx.font = '14px Arial';
-    ctx.textAlign = 'left';
-    const lines = this.wrapText(ctx, content.epubContent || content.text || 'Loading content...', 472);
-    lines.slice(0, 25).forEach((line, i) => ctx.fillText(line, 20, 80 + i * 18));
-
-    ctx.fillStyle = '#666';
-    ctx.textAlign = 'center';
-    ctx.fillText(`Page ${this.currentPage + 1}`, 256, 500);
-
+  // Backwards-compatible: if a Canvas is provided, use it as a fallback (will create CanvasTexture)
+  renderCanvas: function (canvas) {
+    this.disposePages();
     const geometry = new THREE.PlaneGeometry(this.bookWidth * 0.9, this.bookHeight * 0.9);
-    const texture = new THREE.CanvasTexture(canvas);
-    const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ map: texture }));
-    mesh.position.z = this.bookThickness / 2 + 0.001;
-    this.bookContainer.setObject3D('pages', mesh);
+    const image = new Image();
+    image.onload = () => {
+      const texture = new THREE.Texture(image);
+      texture.needsUpdate = true;
+      const material = new THREE.MeshStandardMaterial({ map: texture });
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.position.z = this.bookThickness / 2 + 0.001;
+      this.bookContainer.setObject3D('pages', mesh);
+    };
+    image.src = canvas.toDataURL();
   },
 
   createCover: function () {
@@ -219,52 +276,6 @@ AFRAME.registerComponent("vr-book", {
     this.authorLabelEl = label;
   },
 
-  calculateTotalPages: function () {
-    const words = (this.bookText || '').split(/\s+/).filter(w => w.length);
-    this.totalPages = Math.max(1, Math.ceil(words.length / this.wordsPerPage));
-  },
-
-  getPageContent: function () {
-    const words = (this.bookText || '').split(/\s+/).filter(w => w.length);
-    if (!words.length) return { title: 'Loading...', text: 'Loading content...' };
-
-    const startWord = this.currentPage * this.wordsPerPage;
-    const endWord = Math.min(startWord + this.wordsPerPage, words.length);
-    const pageText = words.slice(startWord, endWord).join(' ');
-
-    let currentChapter = 'Chapter 1';
-    let wordsProcessed = 0;
-    for (const chapter of this.chapters) {
-      const chapterWords = chapter.text.split(/\s+/).filter(w => w.length);
-      if (startWord < wordsProcessed + chapterWords.length) {
-        currentChapter = chapter.title;
-        break;
-      }
-      wordsProcessed += chapterWords.length;
-    }
-
-    return { title: currentChapter, epubContent: pageText };
-  },
-
-  wrapText: function (ctx, text, maxWidth) {
-    if (!text) return ['No content available'];
-    const words = text.split(' ');
-    const lines = [];
-    let line = words[0] || '';
-
-    for (let i = 1; i < words.length; i++) {
-      const test = `${line} ${words[i]}`;
-      if (ctx.measureText(test).width > maxWidth) {
-        lines.push(line);
-        line = words[i];
-      } else {
-        line = test;
-      }
-    }
-    if (line) lines.push(line);
-    return lines;
-  },
-
   setupEvents: function () {
     const scene = document.querySelector('a-scene');
     document.addEventListener('keydown', (e) => {
@@ -283,7 +294,7 @@ AFRAME.registerComponent("vr-book", {
 
   _onAxisMove: function (evt) {
     if (!this.isHovered) return;
-   
+
     const x = evt.detail.x;
     const now = Date.now();
     const sign = x > 0.5 ? 1 : x < -0.5 ? -1 : 0;
@@ -310,19 +321,19 @@ AFRAME.registerComponent("vr-book", {
     this.isHovered = false;
   },
 
-  nextPage: function () {
+  nextPage: async function () {
     if (this.currentPage < (this.totalPages || 100) - 1) {
       this.currentPage++;
-      this.createPages();
+      await this.createPages();
       this.savePage();
       this._triggerHaptic({ intensity: 0.3, duration: 20 });
     }
   },
 
-  prevPage: function () {
+  prevPage: async function () {
     if (this.currentPage > 0) {
       this.currentPage--;
-      this.createPages();
+      await this.createPages();
       this.savePage();
       this._triggerHaptic({ intensity: 0.3, duration: 20 });
     }
@@ -343,7 +354,7 @@ AFRAME.registerComponent("vr-book", {
     if (!this.coverMesh) return;
     // If active is true, keep the cover fully open without oscillation.
     if (this.data && this.data.active) {
-      const target = -(Math.PI / 2);
+      const target = -(Math.PI);
       this.coverMesh.rotation.y = THREE.MathUtils.lerp(this.coverMesh.rotation.y, target, 0.2);
       return;
     }

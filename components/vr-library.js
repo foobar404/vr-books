@@ -1,5 +1,31 @@
 AFRAME.registerComponent("vr-library", {
-    books: [],
+    books: [
+        'a-modest-proposal-by-jonathan-swift',
+        'a-room-with-a-view-by-e-m-forster',
+        'alices-adventures-in-wonderland-by-lewis-carroll',
+        'beowulf-an-anglo-saxon-epic-poem-by-j-lesslie-hall',
+        'cranford-by-elizabeth-cleghorn-gaskell',
+        'dracula-by-bram-stoker',
+        'frankenstein-or-the-modern-prometheus',
+        'history-of-tom-jones-a-foundling-by-henry-fielding',
+        'jane-eyre-an-autobiography-by-charlotte-bronte',
+        'leviathan-by-thomas-hobbes',
+        'little-women-or-meg-jo-beth-and-amy-by-louisa-may-alcott',
+        'middlemarch-by-george-eliot',
+        'moby-dick-or-the-whale-by-herman-melville',
+        'pride-and-prejudice-by-jane-austen',
+        'romeo-and-juliet-by-william-shakespeare',
+        'the-adventures-of-ferdinand-count-fathom-complete-by-t-smollett',
+        'the-adventures-of-roderick-random-by-t-smollett',
+        'the-blue-castle-a-novel-by-l-m-montgomery',
+        'the-complete-works-of-william-shakespeare-by-william-shakespeare',
+        'the-enchanted-april-by-elizabeth-von-arnim',
+        'the-expedition-of-humphry-clinker-by-t-smollett',
+        'the-picture-of-dorian-gray-by-oscar-wilde',
+        'the-scarlet-letter-by-nathaniel-hawthorne',
+        'the-strange-case-of-dr-jekyll-and-mr-hyde-by-robert-louis-stevenson',
+        'twenty-years-after-by-alexandre-dumas-and-auguste-maquet'
+    ],
     bookElements: [],
     rowMax: 5,
     bookSpace: .24,
@@ -12,32 +38,10 @@ AFRAME.registerComponent("vr-library", {
         this.bookElements = []; // Store book elements for animation
         this.time = 0; // Animation time
 
-        // Listen for keyboard events
         document.addEventListener('keydown', (e) => { if (e.key.toLowerCase() === 'h') this.toggleVisibility(); });
-
-        // Listen for VR controller events
         document.addEventListener('bbuttondown', this.toggleVisibility.bind(this));
 
-        const scene = this.el.sceneEl
-        const assetItems = scene.querySelectorAll('a-asset-item');
-        const epubItems = Array.from(assetItems).filter(a => {
-            const src = a.getAttribute('src') || a.src || '';
-            return typeof src === 'string' && src.toLowerCase().endsWith('.epub');
-        });
-
-        if (epubItems.length > 0) {
-            epubItems.forEach(a => {
-                const id = a.getAttribute('id');
-                const src = a.getAttribute('src') || a.src;
-                if (id) {
-                    // Use asset id when available so vr-book can load from a-assets
-                    this.addBook({ assetId: id, src });
-                } else if (src) {
-                    this.addBook(src);
-                }
-            });
-            return;
-        }
+        this.books.forEach(this.addBook.bind(this));
     },
     addBook: function (book) {
         const bookIndex = this.bookElements.length;
@@ -50,9 +54,14 @@ AFRAME.registerComponent("vr-library", {
         const x = (col - (this.rowMax - 1) / 2) * this.bookSpace;
         const y = -row * this.bookSpace;
 
+        // Create slug id from filename/title
+        const slugify = (s) => s.toString().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+        const assetId = slugify(book.replace(/^books\//, '').replace(/\.epub$/, ''));
+
         let bookElm = document.createElement("a-entity");
         bookElm.setAttribute("position", `${x} ${y} 0`);
-        bookElm.setAttribute('vr-book', { assetId: book.assetId });
+        // Pass the slug asset id into vr-book so it can look up the a-asset-item by id
+        bookElm.setAttribute('vr-book', { bookPath: assetId });
 
         // Store book element and original position for animation
         this.bookElements.push({
